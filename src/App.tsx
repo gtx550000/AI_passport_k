@@ -140,18 +140,15 @@ export default function App() {
     abortControllerRef.current = new AbortController();
 
     try {
-      const response = await fetch('/api/ai/v1/chat/completions', {
+      const aiBaseUrl = import.meta.env.VITE_AI_URL || '/api/ai';
+      const response = await fetch(`${aiBaseUrl}/v1/chat/completions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true' // จำเป็นมาก: บอก Ngrok ฟรีว่าเราเป็น API ห้ามบล็อกด้วยหน้าเว็บแจ้งเตือน
+        },
         signal: abortControllerRef.current.signal,
-        body: JSON.stringify({
-          model: aiMode === 'pro' ? 'google/gemma-4-e2b' : 'qwen/qwen3-vl-4b',
-          messages: apiMessages,
-          temperature: aiMode === 'pro' ? 0.4 : 0.7,
-          stream: true,
-        }),
       });
-
       if (!response.body) throw new Error('No response body');
 
       const reader = response.body.getReader();
