@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* เพิ่มโค้ดส่วนนี้เพื่อสร้างคลาสซ่อนแถบเลื่อน */
+@layer utilities {
+  .scrollbar-hide {
+    /* สำหรับ Firefox */
+    scrollbar-width: none;
+    /* สำหรับ IE และ Edge */
+    -ms-overflow-style: none;
+  }
+  
+  /* สำหรับ Chrome, Safari และ Opera */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+body {
+  font-family: 'Prompt', sans-serif;
+}
