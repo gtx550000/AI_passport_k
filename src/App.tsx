@@ -91,7 +91,7 @@ export default function App() {
   };
 
   // 5. ปรับ handleSend ให้รองรับการ "ตอบใหม่ (Regenerate)"
- const handleSend = async (e?: React.FormEvent, isRegenerate = false) => {
+  const handleSend = async (e?: React.FormEvent, isRegenerate = false) => {
     e?.preventDefault();
     if (isGenerating) return;
 
@@ -110,8 +110,8 @@ export default function App() {
       targetInput = lastUserMsg?.content || '';
     } else {
       if (!targetInput) return;
-      // ใส่คำถามใหม่ของผู้ใช้เข้าไปในประวัติ
-      currentMessages.push({ role: 'user', content: targetInput }); 
+      // ใส่คำถามใหม่ของผู้ใช้เข้าไปในประวัติ (บังคับ Type ตรงนี้)
+      currentMessages.push({ role: 'user' as const, content: targetInput }); 
     }
 
     if (!targetInput) return;
@@ -122,10 +122,10 @@ export default function App() {
       ...currentMessages.map(m => ({ role: m.role, content: m.content }))
     ];
 
-    // 3. จำลอง UI: เพิ่มกล่อง Assistant เปล่าๆ เข้าไปท้ายสุด เพื่อรอรับตัวหนังสือ
-    const uiMessages = [...currentMessages, { role: 'assistant', content: '' }];
+    // 3. จำลอง UI: เพิ่มกล่อง Assistant เปล่าๆ เข้าไปท้ายสุด เพื่อรอรับตัวหนังสือ (บังคับ Type ให้รู้ว่าเป็น Message Array)
+    const uiMessages: Message[] = [...currentMessages, { role: 'assistant' as const, content: '' }];
 
-    // 4. สั่งอัปเดต UI (คราวนี้ State จะอัปเดตตอนไหนก็ไม่มีผลกับ API แล้ว)
+    // 4. สั่งอัปเดต UI
     setChatHistory(prev => prev.map(chat => {
       if (chat.id === currentChatId) {
         const newTitle = chat.messages.length === 0 ? targetInput.slice(0, 30) + '...' : chat.title;
@@ -146,7 +146,7 @@ export default function App() {
         signal: abortControllerRef.current.signal,
         body: JSON.stringify({
           model: aiMode === 'pro' ? 'google/gemma-4-e2b' : 'qwen/qwen3-vl-4b',
-          messages: apiMessages, // ส่ง Payload ตัวจริงไปที่นี่
+          messages: apiMessages,
           temperature: aiMode === 'pro' ? 0.4 : 0.7,
           stream: true,
         }),
@@ -177,7 +177,6 @@ export default function App() {
               setChatHistory(prev => prev.map(chat => {
                 if (chat.id === currentChatId) {
                   const newMessages = [...chat.messages];
-                  // แก้ไขการอัปเดต Object ให้ถูกหลัก React
                   newMessages[newMessages.length - 1] = {
                     ...newMessages[newMessages.length - 1],
                     content: aiResponseText
@@ -276,15 +275,13 @@ export default function App() {
             <div 
               className={`max-w-[85%] rounded-2xl px-6 py-4 shadow-sm ${
                 msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-br-none whitespace-pre-wrap' // กล่อง User ไม่ต้องแปลง Markdown
-                  : 'bg-gray-50 text-gray-800 border border-gray-200 rounded-bl-none' // กล่อง AI
+                  ? 'bg-blue-600 text-white rounded-br-none whitespace-pre-wrap' 
+                  : 'bg-gray-50 text-gray-800 border border-gray-200 rounded-bl-none' 
               }`}
             >
              {msg.role === 'user' ? (
-                // ฝั่งผู้ใช้ แสดง Text ธรรมดา
                 msg.content 
               ) : (
-                // ฝั่ง AI เช็คว่าเป็น String ไหม แล้วค่อยครอบด้วย ReactMarkdown (ชั้นเดียว)
                 typeof msg.content === 'string' ? (
                   <ReactMarkdown 
                     className="prose prose-sm md:prose-base prose-blue max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-a:text-blue-600" 
@@ -297,13 +294,11 @@ export default function App() {
                 )
               )}
               
-              {/* เอฟเฟกต์ AI กำลังพิมพ์ */}
               {isGenerating && msg.role === 'assistant' && idx === currentChat.messages.length - 1 && (
                 <span className="inline-block w-2 h-4 mt-2 ml-1 bg-gray-400 animate-pulse"></span>
               )}
             </div>
 
-            {/* ปุ่ม ตอบใหม่ (Regenerate) */}
             {msg.role === 'assistant' && idx === currentChat.messages.length - 1 && !isGenerating && (
               <button 
                 onClick={() => handleSend(undefined, true)} 
@@ -329,7 +324,6 @@ export default function App() {
               disabled={isGenerating}
             />
             
-            {/* 7. สลับปุ่ม ส่ง / หยุด ตามสถานะ isGenerating */}
             <div className="absolute right-2 top-2 bottom-2 flex gap-2">
               {isGenerating ? (
                 <button

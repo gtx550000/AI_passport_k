@@ -22,5 +22,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-*.env
-*vite.config.ts
+.env
+.vite.config.ts
