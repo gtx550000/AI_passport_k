@@ -1,6 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Login from './Login';
+import Sidebar from './Sidebar';
+import ChatInput from './ChatInput';
 import { supabase } from './supabase';
+import * as pdfjsLib from 'pdfjs-dist';
+import { FileText, RefreshCw, X, AlertCircle } from 'lucide-react'; // <-- นำเข้า Lucide Icons
+
+// ตั้งค่า Worker ให้ Vite รู้จักวิธีการประมวลผล PDF เบื้องหลัง
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -8,6 +15,8 @@ import remarkGfm from 'remark-gfm';
 type Message = {
   role: 'user' | 'assistant';
   content: string;
+  fileName?: string;
+  fileText?: string; 
 };
 
 type ChatSession = {
@@ -18,16 +27,16 @@ type ChatSession = {
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
+  
+  // ✅ แก้ไข: ดึงค่านิสัย AI จาก LocalStorage 
+  const [systemPrompt, setSystemPrompt] = useState(() => {
+    const savedPrompt = localStorage.getItem('localAiSystemPrompt');
+    return savedPrompt || 'คุณคือผู้ช่วย AI ที่ชาญฉลาด ตอบคำถามด้วยข้อมูลที่ถูกต้องและกระชับ';
+  });
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
-    return () => subscription.unsubscribe();
-  }, []);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
-  const [aiMode, setAiMode] = useState<'standard' | 'pro'>('standard');
-
-  // 1. ดึงข้อมูลจาก LocalStorage ตอนโหลดหน้าเว็บ (แก้ F5 แล้วหาย)
   const [chatHistory, setChatHistory] = useState<ChatSession[]>(() => {
     const saved = localStorage.getItem('localAiChats');
     return saved ? JSON.parse(saved) : [{ id: Date.now().toString(), title: 'การสนทนาใหม่', messages: [] }];
@@ -39,14 +48,30 @@ export default function App() {
 
   const [input, setInput] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [aiMode, setAiMode] = useState<'standard' | 'pro'>('standard');
+
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return document.documentElement.classList.contains('dark') || window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
+
+  const [attachedFile, setAttachedFile] = useState<{ name: string; text: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // 2. ตัวควบคุมการตัด Connection
+  const textareaRef = useRef<HTMLTextAreaElement>(null); 
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const currentChat = chatHistory.find(c => c.id === currentChatId) || chatHistory[0];
 
-  // 3. บันทึกลง LocalStorage อัตโนมัติเมื่อมีการเปลี่ยนแปลง
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
+    return () => subscription.unsubscribe();
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('localAiChats', JSON.stringify(chatHistory));
   }, [chatHistory]);
@@ -55,10 +80,43 @@ export default function App() {
     localStorage.setItem('localAiCurrentChatId', currentChatId);
   }, [currentChatId]);
 
+  // ✅ แก้ไข: บันทึก System Prompt ลง LocalStorage อัตโนมัติเมื่อมีการเปลี่ยนแปลง
+  useEffect(() => {
+    localStorage.setItem('localAiSystemPrompt', systemPrompt);
+  }, [systemPrompt]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentChat.messages]);
 
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); 
+      if ((input.trim() || attachedFile) && !isGenerating) {
+        handleSend(undefined, false);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      }
+    }
+  };
+  
   const handleNewChat = () => {
     if (isGenerating) return;
     const newChat: ChatSession = { id: Date.now().toString(), title: 'การสนทนาใหม่', messages: [] };
@@ -81,55 +139,88 @@ export default function App() {
     });
   };
 
-  // 4. ฟังก์ชันหยุดการทำงาน
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort(); // ตัดการเชื่อมต่อทันที
-      abortControllerRef.current = null;
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.type !== 'application/pdf') {
+      alert('รองรับเฉพาะไฟล์ PDF เท่านั้นครับ');
+      return;
+    }
+
+    try {
+      setIsGenerating(true); 
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map((item: any) => item.str).join(' ');
+        fullText += pageText + '\n';
+      }
+
+      setAttachedFile({ name: file.name, text: fullText });
+    } catch (error) {
+      console.error('Error reading PDF:', error);
+      alert('เกิดข้อผิดพลาดในการอ่านไฟล์ PDF');
+    } finally {
       setIsGenerating(false);
+      if (fileInputRef.current) fileInputRef.current.value = ''; 
     }
   };
 
-  // 5. ปรับ handleSend ให้รองรับการ "ตอบใหม่ (Regenerate)"
   const handleSend = async (e?: React.FormEvent, isRegenerate = false) => {
     e?.preventDefault();
     if (isGenerating) return;
 
     let targetInput = input.trim();
-    
-    // 1. ดึงประวัติแชทของห้องปัจจุบันมาจัดการแบบ Synchronous (ป้องกัน Bug State ค้าง)
     let currentMessages = [...currentChat.messages];
 
     if (isRegenerate) {
-      // ถ้ากดตอบใหม่ ให้ลบคำตอบ AI อันเก่าออก
       if (currentMessages.length > 0 && currentMessages[currentMessages.length - 1].role === 'assistant') {
         currentMessages.pop(); 
       }
-      // ดึงคำถาม user ล่าสุดมาเป็นเป้าหมาย
       const lastUserMsg = currentMessages.filter(m => m.role === 'user').pop();
       targetInput = lastUserMsg?.content || '';
     } else {
-      if (!targetInput) return;
-      // ใส่คำถามใหม่ของผู้ใช้เข้าไปในประวัติ (บังคับ Type ตรงนี้)
-      currentMessages.push({ role: 'user' as const, content: targetInput }); 
+      if (!targetInput && !attachedFile) return;
+      
+      if (attachedFile) {
+        currentMessages.push({ 
+          role: 'user' as const, 
+          content: targetInput || 'สรุปเนื้อหาในไฟล์นี้ให้หน่อย',
+          fileName: attachedFile.name,
+          fileText: attachedFile.text
+        }); 
+        setAttachedFile(null); 
+      } else {
+        currentMessages.push({ role: 'user' as const, content: targetInput }); 
+      }
     }
 
-    if (!targetInput) return;
+    if (!targetInput && !isRegenerate && currentMessages[currentMessages.length-1].content === '') return;
 
-    // 2. ประกอบร่าง Payload ทันที! (ใช้ข้อมูลที่ชัวร์แล้วส่งไป API โดยไม่มีกล่องเปล่าของ Assistant)
     const apiMessages = [
-      { role: 'system', content: 'คุณคือ AI ผู้ช่วย ตอบคำถามด้วยข้อมูลที่ถูกต้องและเป็นกลางเสมอ' },
-      ...currentMessages.map(m => ({ role: m.role, content: m.content }))
+      { role: 'system', content: systemPrompt }, 
+      ...currentMessages.map(m => {
+        if (m.fileName && m.fileText) {
+          return {
+            role: m.role,
+            content: `เอกสารอ้างอิง: ${m.fileName}\n\nเนื้อหาเอกสาร:\n\`\`\`\n${m.fileText}\n\`\`\`\n\nคำถาม: ${m.content}`
+          };
+        }
+        return { role: m.role, content: m.content };
+      })
     ];
 
-    // 3. จำลอง UI: เพิ่มกล่อง Assistant เปล่าๆ เข้าไปท้ายสุด เพื่อรอรับตัวหนังสือ (บังคับ Type ให้รู้ว่าเป็น Message Array)
     const uiMessages: Message[] = [...currentMessages, { role: 'assistant' as const, content: '' }];
 
-    // 4. สั่งอัปเดต UI
     setChatHistory(prev => prev.map(chat => {
       if (chat.id === currentChatId) {
         const newTitle = chat.messages.length === 0 ? targetInput.slice(0, 30) + '...' : chat.title;
-        return { ...chat, title: newTitle, messages: uiMessages };
+        return { ...chat, title: newTitle || 'แชทจากไฟล์', messages: uiMessages };
       }
       return chat;
     }));
@@ -145,10 +236,9 @@ export default function App() {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true' // จำเป็นมาก: บอก Ngrok ฟรีว่าเราเป็น API ห้ามบล็อกด้วยหน้าเว็บแจ้งเตือน
+          'ngrok-skip-browser-warning': 'true' 
         },
         signal: abortControllerRef.current.signal,
-
         body: JSON.stringify({
           model: aiMode === 'pro' ? 'google/gemma-4-e2b' : 'qwen/qwen3-vl-4b',
           messages: apiMessages,
@@ -156,6 +246,7 @@ export default function App() {
           stream: true,
         }),
       });
+      
       if (!response.body) throw new Error('No response body');
 
       const reader = response.body.getReader();
@@ -218,46 +309,28 @@ export default function App() {
   if (!session) return <Login />;
 
   return (
-    <div className="flex h-screen bg-white font-sans text-gray-800">
+    <div className="flex h-[100dvh] bg-white dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-100 transition-colors duration-200">
       
-      {/* Sidebar */}
-      <aside className="w-64 bg-gray-900 text-gray-200 flex flex-col hidden md:flex">
-        <div className="p-3">
-          <button onClick={handleNewChat} disabled={isGenerating} className="w-full flex items-center gap-2 px-3 py-3 bg-gray-800 hover:bg-gray-700 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-gray-700">
-            <span className="text-xl leading-none">+</span><span>New Chat</span>
-          </button>
-        </div>
-        
-       <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1 mt-2 scrollbar-hide">
-          <p className="text-xs font-semibold text-gray-500 mb-3 px-2">หัวข้อที่ผ่านมา</p>
-          {chatHistory.map(chat => (
-            <div key={chat.id} onClick={() => !isGenerating && setCurrentChatId(chat.id)} className={`flex items-center justify-between px-3 py-2.5 rounded-md cursor-pointer transition-colors group ${currentChatId === chat.id ? 'bg-gray-700 text-white' : 'hover:bg-gray-800'} ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}>
-              <div className="flex items-center gap-2 truncate">
-                <span className="text-sm">💬</span><span className="text-sm truncate">{chat.title}</span>
-              </div>
-              <button onClick={(e) => handleDeleteChat(chat.id, e)} className="text-gray-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">×</button>
-            </div>
-          ))}
-        </div>
-        
-        <div className="p-3 mt-auto border-t border-gray-800">
-          <button onClick={() => supabase.auth.signOut()} className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-md transition-colors">
-            ออกจากระบบ
-          </button>
-        </div>
-      </aside>
+      <Sidebar 
+        chatHistory={chatHistory}
+        currentChatId={currentChatId}
+        isGenerating={isGenerating}
+        onNewChat={handleNewChat}
+        onSelectChat={setCurrentChatId}
+        onDeleteChat={handleDeleteChat}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      />
 
-      {/* Main Area */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden">
+      <main className="flex-1 flex flex-col h-full overflow-hidden bg-white dark:bg-gray-900 transition-colors">
         
-        <header className="hidden md:flex bg-white text-gray-800 p-4 border-b border-gray-200 justify-between items-center shadow-sm z-10">
+        <header className="hidden md:flex bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 p-4 border-b border-gray-200 dark:border-gray-800 justify-between items-center shadow-sm z-10 transition-colors">
            <div className="font-semibold text-lg">{currentChat.title}</div>
-           <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
-             <button onClick={() => setAiMode('standard')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${aiMode === 'standard' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+           <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors">
+             <button onClick={() => setAiMode('standard')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${aiMode === 'standard' ? 'bg-white dark:bg-gray-600 text-gray-800 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}>
                Standard
              </button>
-             <button onClick={() => setAiMode('pro')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${aiMode === 'pro' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-               <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 rounded text-blue-100">AI</span>Pro
+             <button onClick={() => setAiMode('pro')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all flex items-center gap-2 ${aiMode === 'pro' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}>
+               <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 rounded text-blue-100 dark:text-blue-300">AI</span>Pro
              </button>
            </div>
         </header>
@@ -266,93 +339,204 @@ export default function App() {
            <span className="font-semibold truncate">{currentChat.title}</span>
            <button onClick={handleNewChat} disabled={isGenerating} className="text-xl">+</button>
         </header>
-
+        
         <div className="flex-1 overflow-y-auto p-4 md:p-8 w-full max-w-4xl mx-auto space-y-6 scrollbar-hide">
           {currentChat.messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center text-gray-400">
-              <h2 className="text-2xl font-bold text-gray-300 mb-2">Local AI Workspace</h2>
+            <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 dark:text-gray-500">
+              <h2 className="text-2xl font-bold text-gray-300 dark:text-gray-600 mb-2">Local AI Workspace</h2>
               <p>ขับเคลื่อนด้วย RTX 3070</p>
             </div>
           ) : (
-        currentChat.messages.map((msg, idx) => (
-          <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div 
-              className={`max-w-[85%] rounded-2xl px-6 py-4 shadow-sm ${
-                msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-br-none whitespace-pre-wrap' 
-                  : 'bg-gray-50 text-gray-800 border border-gray-200 rounded-bl-none' 
-              }`}
-            >
-             {msg.role === 'user' ? (
-                msg.content 
-              ) : (
-                typeof msg.content === 'string' ? (
-                  <ReactMarkdown 
-                    className="prose prose-sm md:prose-base prose-blue max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-a:text-blue-600" 
-                    remarkPlugins={[remarkGfm]}
-                  >
-                    {msg.content}
-                  </ReactMarkdown>
-                ) : (
-                  <span className="text-gray-400">กำลังเตรียมข้อความ...</span>
-                )
-              )}
-              
-              {isGenerating && msg.role === 'assistant' && idx === currentChat.messages.length - 1 && (
-                <span className="inline-block w-2 h-4 mt-2 ml-1 bg-gray-400 animate-pulse"></span>
-              )}
-            </div>
+            currentChat.messages.map((msg, idx) => (
+              <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div 
+                  className={`max-w-[85%] rounded-2xl px-6 py-4 shadow-sm ${
+                    msg.role === 'user' 
+                      ? 'bg-blue-600 text-white rounded-br-none whitespace-pre-wrap' 
+                      : 'bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-bl-none transition-colors' 
+                  }`}
+                >
+                 {msg.role === 'user' ? (
+                    <div className="flex flex-col gap-2 items-end text-right">
+                      {/* ถ้ามีไฟล์แนบ โชว์ Lucide Icon */}
+                      {msg.fileName && (
+                        <div className="flex items-center gap-2 bg-white/20 px-3 py-2 rounded-xl text-sm border border-white/10 shadow-sm w-fit max-w-full">
+                          <FileText size={18} className="text-blue-100 shrink-0" />
+                          <span className="font-medium text-blue-50 truncate">{msg.fileName}</span>
+                        </div>
+                      )}
+                      <span>{msg.content}</span>
+                    </div>
+                  ) : (
+                    typeof msg.content === 'string' ? (
+                      <ReactMarkdown 
+                        className="prose prose-sm md:prose-base dark:prose-invert prose-blue max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-a:text-blue-600" 
+                        remarkPlugins={[remarkGfm]}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-500">กำลังเตรียมข้อความ...</span>
+                    )
+                  )}
+                  
+                  {isGenerating && msg.role === 'assistant' && idx === currentChat.messages.length - 1 && (
+                    <span className="inline-block w-2 h-4 mt-2 ml-1 bg-gray-400 dark:bg-gray-500 animate-pulse"></span>
+                  )}
+                </div>
 
-            {msg.role === 'assistant' && idx === currentChat.messages.length - 1 && !isGenerating && (
-              <button 
-                onClick={() => handleSend(undefined, true)} 
-                className="text-xs text-gray-400 hover:text-blue-600 mt-2 flex items-center gap-1 transition-colors"
-              >
-                🔄 ตอบใหม่
-              </button>
-            )}
-          </div>
-        ))
+                {msg.role === 'assistant' && idx === currentChat.messages.length - 1 && !isGenerating && (
+                  <button 
+                    onClick={() => handleSend(undefined, true)} 
+                    className="text-xs text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 mt-2 flex items-center gap-1.5 transition-colors"
+                  >
+                    <RefreshCw size={14} /> 
+                    <span>ตอบใหม่</span>
+                  </button>
+                )}
+              </div>
+            ))
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-4 pb-12 bg-white">
-          <form onSubmit={(e) => handleSend(e, false)} className="max-w-4xl mx-auto relative">
-            <input
-              type="text"
-              className="w-full border border-gray-300 bg-white rounded-xl pl-4 pr-24 py-4 shadow-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              placeholder="ส่งข้อความไปที่ Local AI..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={isGenerating}
-            />
-            
-            <div className="absolute right-2 top-2 bottom-2 flex gap-2">
-              {isGenerating ? (
-                <button
-                  type="button"
-                  onClick={handleStop}
-                  className="bg-red-500 text-white px-4 rounded-lg font-medium hover:bg-red-600 transition-colors flex items-center gap-2 shadow-sm"
-                >
-                  ■ หยุด
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!input.trim()}
-                  className="bg-blue-600 text-white px-4 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors shadow-sm"
-                >
-                  ส่ง
-                </button>
-              )}
-            </div>
-          </form>
+        <ChatInput 
+          input={input}
+          setInput={setInput}
+          isGenerating={isGenerating}
+          attachedFile={attachedFile}
+          setAttachedFile={setAttachedFile}
+          textareaRef={textareaRef}
+          fileInputRef={fileInputRef}
+          onInputChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          onFileUpload={handleFileUpload}
+          onSend={(e) => handleSend(e, false)}
+        />
+
+        <div className="text-center text-xs text-gray-400 dark:text-gray-500 mt-2 mb-8">
+           ข้อมูลทั้งหมดถูกประมวลผลบนเครื่อง Local ไม่มีการส่งออกไปยังเซิร์ฟเวอร์ภายนอก
         </div>
-         <div className="text-center text-xs text-gray-400 mt-2 mb-8">
-            ข้อมูลทั้งหมดถูกประมวลผลบนเครื่อง Local ไม่มีการส่งออกไปยังเซิร์ฟเวอร์ภายนอก
-         </div>
       </main>
+
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity">
+          <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden flex flex-col border border-gray-100 dark:border-gray-800 transition-colors">
+            
+            <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">
+              <h3 className="font-bold text-gray-800 dark:text-gray-100">การตั้งค่าบัญชีและ AI</h3>
+              <button 
+                onClick={() => setIsSettingsOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-8 overflow-y-auto max-h-[70vh]">
+              
+              <div className="space-y-4">
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2">บัญชีของคุณ (Profile)</h4>
+                <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-xl">
+                      {session?.user?.email ? session.user.email.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-800 dark:text-gray-200">
+                        {session?.user?.email || 'ไม่พบข้อมูลบัญชี'}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        สถานะ: <span className={session ? "text-green-500 font-medium" : "text-red-500 font-medium"}>
+                          {session ? 'ออนไลน์' : 'ขาดการเชื่อมต่อ'}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowLogoutConfirm(true)}
+                    className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 dark:text-red-400 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    ออกจากระบบ
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2">การแสดงผล (Appearance)</h4>
+                <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
+                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">โหมดกลางคืน (Dark Mode)</span>
+                  <button
+                    onClick={() => setIsDarkMode(!isDarkMode)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${isDarkMode ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isDarkMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2">ตั้งค่าพฤติกรรม AI (System Prompt)</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400">บทบาทที่กำหนดที่นี่ จะเป็นเหมือนคำสั่งฝังหัวให้โมเดลทำตาม</p>
+                <textarea
+                  className="w-full h-28 p-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none text-sm placeholder-gray-400 dark:placeholder-gray-500 transition-colors"
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  placeholder="เช่น: คุณคือโปรแกรมเมอร์มืออาชีพ จงตอบคำถามด้วยการเขียนโค้ดที่ถูกต้องเท่านั้น"
+                />
+              </div>
+
+            </div>
+
+            <div className="p-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex justify-end">
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm"
+              >
+                เสร็จสิ้น
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Logout Confirmation Popup */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4 transition-all">
+          <div className="bg-white dark:bg-gray-900 w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-100 dark:border-gray-800 transform scale-100 animate-in fade-in zoom-in duration-200">
+            
+            <div className="p-6 text-center space-y-4">
+              <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-2">
+                <AlertCircle size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">ยืนยันการออกจากระบบ</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                คุณแน่ใจหรือไม่ว่าต้องการออกจากระบบ Local AI Workspace?
+              </p>
+            </div>
+
+            <div className="p-4 bg-gray-50 dark:bg-gray-800/50 flex gap-3 justify-center border-t border-gray-100 dark:border-gray-800">
+              <button 
+                onClick={() => setShowLogoutConfirm(false)}
+                className="px-6 py-2.5 rounded-xl font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex-1"
+              >
+                ยกเลิก
+              </button>
+              <button 
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  window.location.reload(); 
+                }}
+                className="px-6 py-2.5 rounded-xl font-medium bg-red-600 hover:bg-red-700 text-white transition-colors flex-1 shadow-sm"
+              >
+                ออกจากระบบ
+              </button>
+            </div>
+            
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,269 +2,101 @@ import React, { useState } from 'react';
 import { supabase } from './supabase';
 
 export default function Login() {
+  // สร้าง State สำหรับแยกโหมด เข้าสู่ระบบ vs สมัครสมาชิก
+  const [isLogin, setIsLogin] = useState(true); 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-
   const [loading, setLoading] = useState(false);
-  const [loadingType, setLoadingType] = useState<
-    'login' | 'register' | 'google' | null
-  >(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] = useState<'error' | 'success'>(
-    'error'
-  );
-
-  // ==========================================
-  // Validation Helpers
-  // ==========================================
-  const validateEmail = (email: string) => {
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return re.test(email);
-  };
-
-  const validateInput = () => {
-    if (!email || !password) {
-      setMessage('กรุณากรอก Email และ Password');
-      setMessageType('error');
-      return false;
-    }
-
-    if (!validateEmail(email)) {
-      setMessage('รูปแบบ Email ไม่ถูกต้อง');
-      setMessageType('error');
-      return false;
-    }
-
-    if (password.length < 6) {
-      setMessage('Password ต้องมีอย่างน้อย 6 ตัวอักษร');
-      setMessageType('error');
-      return false;
-    }
-
-    return true;
-  };
-
-  // ==========================================
-  // Email Login
-  // ==========================================
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!validateInput()) return;
-
     setLoading(true);
-    setLoadingType('login');
-    setMessage('');
+    setErrorMsg('');
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        setMessage(error.message);
-        setMessageType('error');
-        return;
-      }
-
-      setMessage('เข้าสู่ระบบสำเร็จ');
-      setMessageType('success');
-
-      // Redirect หลัง Login สำเร็จ
-      window.location.href = '/';
-    } catch (error) {
-      console.error('Login error:', error);
-      setMessage('เกิดข้อผิดพลาดในการเข้าสู่ระบบ');
-      setMessageType('error');
-    } finally {
-      setLoading(false);
-      setLoadingType(null);
-    }
-  };
-
-  // ==========================================
-  // Register
-  // ==========================================
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!validateInput()) return;
-
-    setLoading(true);
-    setLoadingType('register');
-    setMessage('');
-
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-
-      if (error) {
-        setMessage(error.message);
-        setMessageType('error');
-        return;
-      }
-
-      // ถ้า Supabase เปิด Confirm Email
-      if (data.user && !data.session) {
-        setMessage('สมัครสมาชิกสำเร็จ กรุณาตรวจสอบ Email เพื่อยืนยันบัญชี');
-        setMessageType('success');
+      if (isLogin) {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
       } else {
-        setMessage('สมัครสมาชิกสำเร็จ');
-        setMessageType('success');
-        window.location.href = '/';
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        alert('สมัครสมาชิกสำเร็จ! กรุณาล็อกอินเพื่อเข้าใช้งาน');
+        setIsLogin(true); // สมัครเสร็จ เด้งกลับมาหน้าล็อกอินอัตโนมัติ
+        setPassword('');
       }
-    } catch (error) {
-      console.error('Register error:', error);
-      setMessage('เกิดข้อผิดพลาดในการสมัครสมาชิก');
-      setMessageType('error');
+    } catch (error: any) {
+      setErrorMsg(error.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
     } finally {
       setLoading(false);
-      setLoadingType(null);
-    }
-  };
-
-  // ==========================================
-  // Google Login
-  // ==========================================
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    setLoadingType('google');
-    setMessage('');
-
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/`,
-        },
-      });
-
-      if (error) {
-        setMessage(error.message);
-        setMessageType('error');
-        setLoading(false);
-        setLoadingType(null);
-      }
-    } catch (error) {
-      console.error('Google Login error:', error);
-      setMessage('ไม่สามารถเข้าสู่ระบบด้วย Google ได้');
-      setMessageType('error');
-      setLoading(false);
-      setLoadingType(null);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100 font-sans px-4">
-      <div className="p-8 bg-white rounded-2xl shadow-lg w-full max-w-sm border border-gray-200">
+    <div className="flex h-[100dvh] items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
         
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Local AI</h1>
-          <p className="text-sm text-gray-500">เข้าสู่ระบบเพื่อใช้งาน RTX 3070</p>
-        </div>
+        {/* ส่วนหัวข้อ */}
+        <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">
+          {isLogin ? 'เข้าสู่ระบบ' : 'สร้างบัญชีใหม่'}
+        </h2>
+        <p className="text-center text-gray-500 mb-6 text-sm">
+          {isLogin ? 'ยินดีต้อนรับกลับสู่ Local AI Workspace' : 'สมัครสมาชิกเพื่อเริ่มใช้งาน AI บนเครื่องของคุณ'}
+        </p>
 
-        <form className="space-y-4">
-          
-          {/* Email */}
+        {/* กล่องแจ้งเตือน Error */}
+        {errorMsg && (
+          <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg text-center border border-red-100">
+            {errorMsg}
+          </div>
+        )}
+
+        {/* ฟอร์มกรอกข้อมูล */}
+        <form onSubmit={handleAuth} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
             <input
               type="email"
+              required
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-              placeholder="you@example.com"
-              disabled={loading}
-              required
+              placeholder="your@email.com"
             />
           </div>
-
-          {/* Password */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">รหัสผ่าน</label>
             <input
               type="password"
+              required
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
               placeholder="••••••••"
-              disabled={loading}
-              required
             />
           </div>
 
-          {/* Message */}
-          {message && (
-            <div
-              className={`text-sm text-center p-3 rounded-md ${
-                messageType === 'success'
-                  ? 'bg-green-50 text-green-600'
-                  : 'bg-red-50 text-red-600'
-              }`}
-            >
-              {message}
-            </div>
-          )}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 mt-2"
+          >
+            {loading ? 'กำลังดำเนินการ...' : (isLogin ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก')}
+          </button>
+        </form>
 
-          {/* Email Buttons */}
-          <div className="flex gap-3 pt-2">
-            
-            {/* Login */}
-            <button
-              type="button"
-              onClick={handleLogin}
-              disabled={loading}
-              className="flex-1 bg-blue-600 text-white px-4 py-2.5 rounded-xl font-medium hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
-            >
-              {loadingType === 'login' ? 'กำลังเข้าสู่ระบบ...' : 'ล็อกอิน'}
-            </button>
-
-            {/* Register */}
-            <button
-              type="button"
-              onClick={handleSignUp}
-              disabled={loading}
-              className="flex-1 bg-white border border-gray-300 text-gray-700 px-4 py-2.5 rounded-xl font-medium hover:bg-gray-50 disabled:bg-gray-100 transition-colors"
-            >
-              {loadingType === 'register' ? 'กำลังสมัคร...' : 'สมัครใหม่'}
-            </button>
-            
-          </div>
-
-          {/* Divider */}
-          <div className="flex items-center gap-3 py-3">
-            <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-xs text-gray-400">หรือ</span>
-            <div className="flex-1 h-px bg-gray-200" />
-          </div>
-
-          {/* Google Login */}
+        {/* ปุ่มสลับโหมด */}
+        <div className="mt-6 text-center text-sm text-gray-600">
+          {isLogin ? 'ยังไม่มีบัญชีใช่ไหม? ' : 'มีบัญชีอยู่แล้วใช่ไหม? '}
           <button
             type="button"
-            onClick={handleGoogleLogin}
-            disabled={loading}
-            className="w-full bg-white border border-gray-300 text-gray-700 px-4 py-3 rounded-xl font-medium hover:bg-gray-50 disabled:bg-gray-100 transition-colors flex items-center justify-center gap-3"
+            onClick={() => { setIsLogin(!isLogin); setErrorMsg(''); }}
+            className="text-blue-600 font-semibold hover:underline"
           >
-            {loadingType === 'google' ? (
-              'กำลังเข้าสู่ระบบด้วย Google...'
-            ) : (
-              <>
-                <span className="text-lg font-bold">G</span>
-                <span>เข้าสู่ระบบด้วย Google</span>
-              </>
-            )}
+            {isLogin ? 'สมัครสมาชิกฟรี' : 'เข้าสู่ระบบเลย'}
           </button>
+        </div>
 
-        </form>
       </div>
     </div>
   );
