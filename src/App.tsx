@@ -478,7 +478,7 @@ export default function App() {
 
               <div className="space-y-3">
                 <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2">ตั้งค่าพฤติกรรม AI (System Prompt)</h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400">บทบาทที่กำหนดที่นี่ จะเป็นเหมือนคำสั่งฝังหัวให้โมเดลทำตาม</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">บทบาทที่กำหนดที่นี่</p>
                 <textarea
                   className="w-full h-28 p-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none text-sm placeholder-gray-400 dark:placeholder-gray-500 transition-colors"
                   value={systemPrompt}
