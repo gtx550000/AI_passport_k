@@ -9,7 +9,6 @@ import { useAiProfiler } from './hooks/useAiProfiler';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
-// ✅ ประกาศ Type ที่นี่ เพื่อส่งให้ฟังก์ชันอื่นๆ ใช้ และป้องกัน Vite หาไม่เจอ
 export type Message = {
   role: 'user' | 'assistant';
   content: string;
@@ -55,7 +54,7 @@ function Workspace({ session }: { session: any }) {
     currentChatId: `localAiCurrentChatId_${userId}`,
     systemPrompt: `localAiSystemPrompt_${userId}`,
     maxHistory: `localAiMaxHistory_${userId}`,
-    darkMode: `localAiDarkMode` // ✅ คีย์สำหรับจำ Dark Mode
+    darkMode: `localAiDarkMode` 
   };
 
   // --- States ---
@@ -74,7 +73,8 @@ function Workspace({ session }: { session: any }) {
   const [aiMode, setAiMode] = useState<'standard' | 'pro'>('standard');
   const [attachedFile, setAttachedFile] = useState<{ name: string; text: string } | null>(null);
   
-  // ✅ แก้ไข State ของ Dark Mode ให้ดึงค่าจาก LocalStorage ก่อน
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem(storageKeys.darkMode);
     if (saved !== null) return saved === 'true';
@@ -98,7 +98,6 @@ function Workspace({ session }: { session: any }) {
   useEffect(() => localStorage.setItem(storageKeys.maxHistory, maxHistory.toString()), [maxHistory, storageKeys.maxHistory]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [currentChat.messages]);
   
-  // ✅ เซฟค่า Dark Mode ลง LocalStorage ด้วย
   useEffect(() => {
     localStorage.setItem(storageKeys.darkMode, isDarkMode.toString());
     if (isDarkMode) document.documentElement.classList.add('dark');
@@ -114,13 +113,18 @@ function Workspace({ session }: { session: any }) {
     }
   };
 
-// ฟังก์ชันหยุดการทำงาน (ผูกกับปุ่มใน ChatInput)
   const handleStop = () => {
     if (abortControllerRef.current) {
-      abortControllerRef.current.abort(); // ตัดการเชื่อมต่อทันที
+      abortControllerRef.current.abort(); 
       abortControllerRef.current = null;
-      setIsGenerating(false); // ปลดล็อกช่องพิมพ์
+      setIsGenerating(false); 
     }
+  };
+
+  const handleCopy = (text: string, index: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(index);
+    setTimeout(() => setCopiedIndex(null), 2000); 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -266,17 +270,14 @@ function Workspace({ session }: { session: any }) {
         }
       }
     } catch (error: any) {
-      // 1. ดักจับ Error ที่เกิดจากการกดปุ่มหยุด (AbortError)
       if (error.name === 'AbortError') {
         console.log('User stopped generation'); 
         
-        // 2. อัปเดตข้อความในกล่อง UI ทันที
         setChatHistory(prev => prev.map(chat => {
           if (chat.id === currentChatId) {
             const newMessages = [...chat.messages];
             const lastMsg = newMessages[newMessages.length - 1];
             
-            // ลอจิก: ถ้ากล่องยังว่างอยู่ ให้ขึ้นว่ายกเลิก แต่ถ้า AI พิมพ์มาบ้างแล้ว ให้ต่อท้ายข้อความ
            newMessages[newMessages.length - 1] = {
               ...lastMsg,
               content: '🚫 คำถามถูกหยุดจากผู้ใช้งาน' 
@@ -287,7 +288,6 @@ function Workspace({ session }: { session: any }) {
         }));
 
       } else {
-        // กรณี Error อื่นๆ (เช่น เซิร์ฟเวอร์ปิด, เน็ตหลุด)
         setChatHistory(prev => prev.map(chat => {
           if (chat.id === currentChatId) {
             const newMessages = [...chat.messages];
@@ -356,8 +356,60 @@ function Workspace({ session }: { session: any }) {
                   )}
                   {isGenerating && msg.role === 'assistant' && idx === currentChat.messages.length - 1 && <span className="inline-block w-2 h-4 mt-2 ml-1 bg-gray-400 dark:bg-gray-500 animate-pulse"></span>}
                 </div>
-                {msg.role === 'assistant' && idx === currentChat.messages.length - 1 && !isGenerating && (
-                  <button onClick={() => handleSend(undefined, true)} className="text-xs text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 mt-2 flex items-center gap-1.5 transition-colors"><RefreshCw size={14} /> <span>ตอบใหม่</span></button>
+                
+                {/* Action Bar สำหรับ AI */}
+                {msg.role === 'assistant' && (
+                  <div className="flex items-center gap-4 mt-2 px-2">
+                    <button 
+                      onClick={() => handleCopy(String(msg.content), idx)}
+                      className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex items-center gap-1 transition-colors"
+                      title="คัดลอกข้อความ"
+                    >
+                      {copiedIndex === idx ? (
+                        <span className="text-green-500 flex items-center gap-1 font-medium">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                          คัดลอกแล้ว
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                          คัดลอก
+                        </span>
+                      )}
+                    </button>
+
+                    {idx === currentChat.messages.length - 1 && !isGenerating && (
+                      <button 
+                        onClick={() => handleSend(undefined, true)} 
+                        className="text-xs text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1.5 transition-colors"
+                      >
+                        <RefreshCw size={14} /> <span>ตอบใหม่</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* ✅ Action Bar สำหรับ User */}
+                {msg.role === 'user' && (
+                  <div className="flex items-center gap-4 mt-2 px-2">
+                    <button 
+                      onClick={() => handleCopy(String(msg.content), idx)}
+                      className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex items-center gap-1 transition-colors"
+                      title="คัดลอกข้อความของคุณ"
+                    >
+                      {copiedIndex === idx ? (
+                        <span className="text-green-500 flex items-center gap-1 font-medium">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                          คัดลอกแล้ว
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                          คัดลอก
+                        </span>
+                      )}
+                    </button>
+                  </div>
                 )}
               </div>
             ))
@@ -372,7 +424,7 @@ function Workspace({ session }: { session: any }) {
         </div>
       </main>
 
-      {/* ✅ คืนชีพ UI หน้าตั้งค่าแบบเต็มรูปแบบ */}
+      {/* ตั้งค่าบัญชีและ AI */}
       {isSettingsOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity">
           <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden flex flex-col border border-gray-100 dark:border-gray-800 transition-colors">
