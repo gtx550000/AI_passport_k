@@ -212,7 +212,7 @@ function Workspace({ session }: { session: any }) {
         headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         signal: abortControllerRef.current.signal,
         body: JSON.stringify({
-          model: aiMode === 'pro' ? 'google/gemma-4-e2b' : 'typhoon-7b',
+          model: aiMode === 'pro' ? 'google/gemma-4-e2b' : 'typhoon2.1-gemma3-4b',
           messages: apiMessages,
           temperature: aiMode === 'pro' ? 0.4 : 0.7,
           stream: true,
