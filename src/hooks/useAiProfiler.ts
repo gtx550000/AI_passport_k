@@ -38,7 +38,7 @@ export function useAiProfiler(userId: string, aiMode: 'standard' | 'pro') {
 ข้อบังคับ: 
 1. ตอบกลับมาเป็น JSON FORMAT เท่านั้น ห้ามมีคำอธิบายอื่นเจือปน
 2. โครงสร้าง JSON ต้องมี keys: "skills", "interests", "style"
-
+3. ห้ามลบความชอบหรือทักษะเดิมทิ้งเด็ดขาด ให้ทำการผนวก (Append) ข้อมูลใหม่เข้าไปเพิ่มเติมเท่านั้น
 ข้อมูลผู้ใช้เดิม:
 ${userProfile}
     `;

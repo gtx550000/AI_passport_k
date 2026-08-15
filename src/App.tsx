@@ -5,17 +5,17 @@ import ChatInput from './ChatInput';
 import { supabase } from './supabase';
 import * as pdfjsLib from 'pdfjs-dist';
 import { FileText, RefreshCw, X, AlertCircle } from 'lucide-react';
-import { useAiProfiler } from './hooks/useAiProfiler'; 
+import { useAiProfiler } from './hooks/useAiProfiler';
 
-// นำ Type Message กลับมาประกาศไว้ที่นี่โดยตรง เพื่อไม่ให้ Vite สับสน
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+// ✅ ประกาศ Type ที่นี่ เพื่อส่งให้ฟังก์ชันอื่นๆ ใช้ และป้องกัน Vite หาไม่เจอ
 export type Message = {
   role: 'user' | 'assistant';
   content: string;
   fileName?: string;
   fileText?: string; 
 };
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 type ChatSession = {
   id: string;
@@ -54,11 +54,12 @@ function Workspace({ session }: { session: any }) {
     chats: `localAiChats_${userId}`,
     currentChatId: `localAiCurrentChatId_${userId}`,
     systemPrompt: `localAiSystemPrompt_${userId}`,
-    maxHistory: `localAiMaxHistory_${userId}`
+    maxHistory: `localAiMaxHistory_${userId}`,
+    darkMode: `localAiDarkMode` // ✅ คีย์สำหรับจำ Dark Mode
   };
 
   // --- States ---
-  const [systemPrompt, setSystemPrompt] = useState(() => localStorage.getItem(storageKeys.systemPrompt) || 'คุณคือผู้ช่วย AI...');
+  const [systemPrompt, setSystemPrompt] = useState(() => localStorage.getItem(storageKeys.systemPrompt) || 'คุณคือผู้ช่วย AI ที่ชาญฉลาด ตอบคำถามด้วยข้อมูลที่ถูกต้องและกระชับ');
   const [maxHistory, setMaxHistory] = useState<number>(() => parseInt(localStorage.getItem(storageKeys.maxHistory) || '6', 10));
   const [chatHistory, setChatHistory] = useState<ChatSession[]>(() => {
     const saved = localStorage.getItem(storageKeys.chats);
@@ -72,7 +73,14 @@ function Workspace({ session }: { session: any }) {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [aiMode, setAiMode] = useState<'standard' | 'pro'>('standard');
   const [attachedFile, setAttachedFile] = useState<{ name: string; text: string } | null>(null);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  
+  // ✅ แก้ไข State ของ Dark Mode ให้ดึงค่าจาก LocalStorage ก่อน
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem(storageKeys.darkMode);
+    if (saved !== null) return saved === 'true';
+    if (typeof window !== 'undefined') return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return false;
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -89,7 +97,10 @@ function Workspace({ session }: { session: any }) {
   useEffect(() => localStorage.setItem(storageKeys.systemPrompt, systemPrompt), [systemPrompt, storageKeys.systemPrompt]);
   useEffect(() => localStorage.setItem(storageKeys.maxHistory, maxHistory.toString()), [maxHistory, storageKeys.maxHistory]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [currentChat.messages]);
+  
+  // ✅ เซฟค่า Dark Mode ลง LocalStorage ด้วย
   useEffect(() => {
+    localStorage.setItem(storageKeys.darkMode, isDarkMode.toString());
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
@@ -212,7 +223,7 @@ function Workspace({ session }: { session: any }) {
         headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         signal: abortControllerRef.current.signal,
         body: JSON.stringify({
-          model: aiMode === 'pro' ? 'google/gemma-4-e2b' : 'typhoon2.1-gemma3-4b',
+          model: aiMode === 'pro' ? 'google/gemma-4-e2b' : 'qwen/qwen3-vl-4b',
           messages: apiMessages,
           temperature: aiMode === 'pro' ? 0.4 : 0.7,
           stream: true,
@@ -296,7 +307,6 @@ function Workspace({ session }: { session: any }) {
                     </div>
                   ) : (
                     typeof msg.content === 'string' ? (
-                      /* 🚀 นำ ReactMarkdown ออก แล้วใช้ div ที่มี whitespace-pre-wrap แทน */
                       <div className="whitespace-pre-wrap break-words">
                         {msg.content}
                       </div>
@@ -322,52 +332,80 @@ function Workspace({ session }: { session: any }) {
         </div>
       </main>
 
-      {/* Settings Modal */}
+      {/* ✅ คืนชีพ UI หน้าตั้งค่าแบบเต็มรูปแบบ */}
       {isSettingsOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity">
           <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden flex flex-col border border-gray-100 dark:border-gray-800 transition-colors">
+            
             <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">
               <h3 className="font-bold text-gray-800 dark:text-gray-100">การตั้งค่าบัญชีและ AI</h3>
-              <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"><X size={20} /></button>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1">
+                <X size={20} />
+              </button>
             </div>
             
             <div className="p-6 space-y-8 overflow-y-auto max-h-[70vh]">
+              
               <div className="space-y-4">
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2">บัญชีของคุณ (Profile)</h4>
                 <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-xl">{session?.user?.email ? session.user.email.charAt(0).toUpperCase() : 'U'}</div>
+                    <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-xl">
+                      {session?.user?.email ? session.user.email.charAt(0).toUpperCase() : 'U'}
+                    </div>
                     <div>
-                      <p className="font-medium text-gray-800 dark:text-gray-200">{session?.user?.email || 'ไม่พบข้อมูลบัญชี'}</p>
-                      <p className="text-xs text-gray-500">สถานะ: <span className="text-green-500 font-medium">ออนไลน์</span></p>
+                      <p className="font-medium text-gray-800 dark:text-gray-200">
+                        {session?.user?.email || 'ไม่พบข้อมูลบัญชี'}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        สถานะ: <span className={session ? "text-green-500 font-medium" : "text-red-500 font-medium"}>
+                          {session ? 'ออนไลน์' : 'ขาดการเชื่อมต่อ'}
+                        </span>
+                      </p>
                     </div>
                   </div>
-                  <button onClick={() => setShowLogoutConfirm(true)} className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 rounded-lg text-sm font-medium transition-colors">ออกจากระบบ</button>
+                  <button onClick={() => setShowLogoutConfirm(true)} className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 dark:text-red-400 rounded-lg text-sm font-medium transition-colors">
+                    ออกจากระบบ
+                  </button>
                 </div>
               </div>
 
               <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2">การแสดงผล (Appearance)</h4>
                 <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
                   <span className="text-sm font-medium text-gray-800 dark:text-gray-200">โหมดกลางคืน (Dark Mode)</span>
-                  <button onClick={() => setIsDarkMode(!isDarkMode)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isDarkMode ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}><span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isDarkMode ? 'translate-x-6' : 'translate-x-1'}`} /></button>
+                  <button onClick={() => setIsDarkMode(!isDarkMode)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${isDarkMode ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isDarkMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
                 </div>
               </div>
 
               <div className="space-y-3">
-                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2">ระบบ AI และความจำ</h4>
-                <textarea className="w-full h-20 p-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 text-sm transition-colors" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} placeholder="บทบาทของ AI..." />
-                
-                <div className="pt-2">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs text-gray-500">ประวัติที่ส่งประมวลผล (Rolling Window)</span>
-                    <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded-md">{maxHistory} ข้อความ</span>
-                  </div>
-                  <input type="range" min="2" max="20" step="2" value={maxHistory} onChange={(e) => setMaxHistory(parseInt(e.target.value, 10))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-blue-600" />
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2">ตั้งค่าพฤติกรรม AI (System Prompt)</h4>
+                <p className="text-xs text-gray-500 dark:text-gray-400">บทบาทที่กำหนดที่นี่ จะเป็นเหมือนคำสั่งฝังหัวให้โมเดลทำตาม</p>
+                <textarea className="w-full h-28 p-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none text-sm placeholder-gray-400 dark:placeholder-gray-500 transition-colors" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} placeholder="เช่น: คุณคือโปรแกรมเมอร์มืออาชีพ จงตอบคำถามด้วยการเขียนโค้ดที่ถูกต้องเท่านั้น" />
+              </div>
+
+              <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">ความจำระยะสั้น (Rolling Window)</h4>
+                  <span className="text-xs font-bold bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 px-2 py-1 rounded-md">
+                    {maxHistory} ข้อความ
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  กำหนดจำนวนประวัติล่าสุดที่จะส่งให้ AI (ค่าน้อยช่วยประหยัด VRAM, ค่ามาก AI จะจำเรื่องที่คุยกันได้เยอะขึ้น)
+                </p>
+                <input type="range" min="2" max="20" step="2" value={maxHistory} onChange={(e) => setMaxHistory(parseInt(e.target.value, 10))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-blue-600" />
+                <div className="flex justify-between text-[10px] text-gray-400 font-medium px-1">
+                  <span>เร็ว / ประหยัดการ์ดจอ</span>
+                  <span>จำเก่ง / กิน VRAM</span>
                 </div>
               </div>
 
               <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-700">
                 <h4 className="text-sm font-semibold text-blue-600 dark:text-blue-400">สิ่งที่ AI เรียนรู้เกี่ยวกับคุณ</h4>
-                <p className="text-xs text-gray-500">แฟ้มประวัติส่วนตัวที่จะอัปเดตอัตโนมัติทุกๆ 5 ข้อความ</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">แฟ้มประวัติส่วนตัวที่จะอัปเดตอัตโนมัติทุกๆ 5 ข้อความ</p>
                 <pre className="text-[10px] sm:text-xs bg-gray-900 text-green-400 p-3 rounded-xl overflow-x-auto shadow-inner border border-gray-800">
                   {(() => {
                     try { return JSON.stringify(JSON.parse(userProfile), null, 2); } 
@@ -377,8 +415,11 @@ function Workspace({ session }: { session: any }) {
               </div>
 
             </div>
+
             <div className="p-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex justify-end">
-              <button onClick={() => setIsSettingsOpen(false)} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm">ปิด</button>
+              <button onClick={() => setIsSettingsOpen(false)} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm">
+                เสร็จสิ้น
+              </button>
             </div>
           </div>
         </div>
