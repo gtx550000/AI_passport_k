@@ -114,6 +114,15 @@ function Workspace({ session }: { session: any }) {
     }
   };
 
+// ฟังก์ชันหยุดการทำงาน (ผูกกับปุ่มใน ChatInput)
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort(); // ตัดการเชื่อมต่อทันที
+      abortControllerRef.current = null;
+      setIsGenerating(false); // ปลดล็อกช่องพิมพ์
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault(); 
@@ -257,8 +266,39 @@ function Workspace({ session }: { session: any }) {
         }
       }
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        setChatHistory(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, messages: chat.messages.map((m, i) => i === chat.messages.length - 1 ? { ...m, content: '❌ เกิดข้อผิดพลาด' } : m) } : chat));
+      // 1. ดักจับ Error ที่เกิดจากการกดปุ่มหยุด (AbortError)
+      if (error.name === 'AbortError') {
+        console.log('User stopped generation'); 
+        
+        // 2. อัปเดตข้อความในกล่อง UI ทันที
+        setChatHistory(prev => prev.map(chat => {
+          if (chat.id === currentChatId) {
+            const newMessages = [...chat.messages];
+            const lastMsg = newMessages[newMessages.length - 1];
+            
+            // ลอจิก: ถ้ากล่องยังว่างอยู่ ให้ขึ้นว่ายกเลิก แต่ถ้า AI พิมพ์มาบ้างแล้ว ให้ต่อท้ายข้อความ
+           newMessages[newMessages.length - 1] = {
+              ...lastMsg,
+              content: '🚫 คำถามถูกหยุดจากผู้ใช้งาน' 
+            };
+            return { ...chat, messages: newMessages };
+          }
+          return chat;
+        }));
+
+      } else {
+        // กรณี Error อื่นๆ (เช่น เซิร์ฟเวอร์ปิด, เน็ตหลุด)
+        setChatHistory(prev => prev.map(chat => {
+          if (chat.id === currentChatId) {
+            const newMessages = [...chat.messages];
+            newMessages[newMessages.length - 1] = {
+              ...newMessages[newMessages.length - 1],
+              content: '❌ เกิดข้อผิดพลาดในการเชื่อมต่อ'
+            };
+            return { ...chat, messages: newMessages };
+          }
+          return chat;
+        }));
       }
     } finally {
       setIsGenerating(false);
@@ -325,7 +365,7 @@ function Workspace({ session }: { session: any }) {
           <div ref={messagesEndRef} />
         </div>
 
-        <ChatInput input={input} setInput={setInput} isGenerating={isGenerating} attachedFile={attachedFile} setAttachedFile={setAttachedFile} textareaRef={textareaRef} fileInputRef={fileInputRef} onInputChange={handleInputChange} onKeyDown={handleKeyDown} onFileUpload={handleFileUpload} onSend={(e) => handleSend(e, false)} />
+        <ChatInput input={input} setInput={setInput} isGenerating={isGenerating} attachedFile={attachedFile} setAttachedFile={setAttachedFile} textareaRef={textareaRef} fileInputRef={fileInputRef} onInputChange={handleInputChange} onKeyDown={handleKeyDown} onFileUpload={handleFileUpload} onSend={(e) => handleSend(e, false)} onStop={handleStop}/>
         
         <div className="text-center text-xs text-gray-400 dark:text-gray-500 mt-2 mb-8">
            ข้อมูลถูกประมวลผลบน Local | รอบการเรียนรู้: {messageCounter % 5}/5

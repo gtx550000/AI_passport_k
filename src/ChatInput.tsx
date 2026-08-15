@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, Send, FileText, X } from 'lucide-react';
+import { Paperclip, Send, FileText, X, Square } from 'lucide-react'; // 1. นำเข้า Square icon
 
 interface ChatInputProps {
   input: string;
@@ -13,6 +13,7 @@ interface ChatInputProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onSend: (e?: React.FormEvent) => void;
+  onStop: () => void; // 2. เพิ่ม Prop สำหรับฟังก์ชันหยุด AI
 }
 
 export default function ChatInput({
@@ -26,7 +27,8 @@ export default function ChatInput({
   onInputChange,
   onKeyDown,
   onFileUpload,
-  onSend
+  onSend,
+  onStop // 3. รับ Prop onStop เข้ามาใช้งาน
 }: ChatInputProps) {
   return (
     <div className="p-4 pb-12 bg-white dark:bg-gray-900 transition-colors">
@@ -80,16 +82,27 @@ export default function ChatInput({
             </button>
           </div>
 
-          {/* ปุ่มส่ง (Lucide Icons) */}
+          {/* 4. สลับแสดงปุ่มส่ง และ ปุ่มหยุด ตามสถานะ isGenerating */}
           <div className="absolute bottom-2 right-2 flex items-center">
-            <button
-              type="submit"
-              disabled={(!input.trim() && !attachedFile) || isGenerating}
-              className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-2 font-medium disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 transition-colors flex items-center justify-center gap-2"
-            >
-              <span>ส่ง</span>
-              <Send size={16} />
-            </button>
+            {isGenerating ? (
+              <button
+                type="button"
+                onClick={onStop}
+                className="bg-red-500 hover:bg-red-600 text-white rounded-xl px-4 py-2 font-medium transition-colors flex items-center justify-center gap-2 shadow-sm"
+              >
+                <span>หยุด</span>
+                <Square size={14} className="fill-current" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim() && !attachedFile}
+                className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-2 font-medium disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 transition-colors flex items-center justify-center gap-2 shadow-sm"
+              >
+                <span>ส่ง</span>
+                <Send size={16} />
+              </button>
+            )}
           </div>
         </div>
       </form>
